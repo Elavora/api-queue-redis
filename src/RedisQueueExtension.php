@@ -11,6 +11,8 @@ use Elavora\Api\Framework\Application;
 use Elavora\Api\Framework\Container;
 use Elavora\Api\Framework\Contracts\Extension;
 use Elavora\Api\Framework\Contracts\Queue;
+use InvalidArgumentException;
+use RuntimeException;
 
 final class RedisQueueExtension implements Extension
 {
@@ -18,12 +20,17 @@ final class RedisQueueExtension implements Extension
     private readonly string $prefix;
 
     /**
-     * @param array{host?: string, port?: int|string, timeout?: float|int|string, password?: string|null, database?: int|string|null, prefix?: string} $config
+     * @param array<string, mixed> $config
      */
     public function __construct(private readonly array $config)
     {
         $this->redisConfig = RedisConfig::fromArray($config);
-        $this->prefix = (string) ($config['prefix'] ?? '');
+        $prefix = $config['prefix'] ?? '';
+        if (!is_string($prefix)) {
+            throw new InvalidArgumentException('O prefixo da fila Redis deve ser uma string.');
+        }
+
+        $this->prefix = $prefix;
     }
 
     /**
@@ -35,10 +42,20 @@ final class RedisQueueExtension implements Extension
 
         $application->container()->bind(
             Queue::class,
-            fn (Container $container): RedisQueue => new RedisQueue(
-                redis: $container->get(RedisConnectionFactory::class)->connect($this->redisConfig),
-                prefix: $this->prefix
-            )
+            fn (Container $container): RedisQueue => $this->createQueue($container)
+        );
+    }
+
+    private function createQueue(Container $container): RedisQueue
+    {
+        $factory = $container->get(RedisConnectionFactory::class);
+        if (!$factory instanceof RedisConnectionFactory) {
+            throw new RuntimeException('O servico RedisConnectionFactory possui tipo invalido.');
+        }
+
+        return new RedisQueue(
+            redis: $factory->connect($this->redisConfig),
+            prefix: $this->prefix
         );
     }
 }

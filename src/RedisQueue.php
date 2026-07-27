@@ -6,6 +6,7 @@ namespace Elavora\Api\Extension\QueueRedis;
 
 use Elavora\Api\Extension\Redis\Contracts\RedisClient;
 use Elavora\Api\Framework\Contracts\Queue;
+use RuntimeException;
 use UnexpectedValueException;
 
 final class RedisQueue implements Queue
@@ -27,7 +28,11 @@ final class RedisQueue implements Queue
      */
     public function push(string $queue, array $payload): void
     {
-        $this->redis->rPush($this->queueKey($queue), serialize($payload));
+        $result = $this->redis->rPush($this->queueKey($queue), serialize($payload));
+
+        if ($result === false || $result <= 0) {
+            throw new RuntimeException("Falha ao enfileirar mensagem na fila Redis '{$queue}'.");
+        }
     }
 
     /**
@@ -45,15 +50,30 @@ final class RedisQueue implements Queue
 
         $value = unserialize($payload, ['allowed_classes' => false]);
 
-        if (!is_array($value)) {
+        if (!is_array($value) || !$this->hasOnlyStringKeys($value)) {
             throw new UnexpectedValueException('Payload invalido recebido da fila Redis.');
         }
 
+        /** @var array<string, mixed> $value */
         return $value;
     }
 
     private function queueKey(string $queue): string
     {
         return $this->prefix . $queue;
+    }
+
+    /**
+     * @param array<mixed, mixed> $value
+     */
+    private function hasOnlyStringKeys(array $value): bool
+    {
+        foreach (array_keys($value) as $key) {
+            if (!is_string($key)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

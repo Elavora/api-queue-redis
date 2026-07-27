@@ -1,51 +1,48 @@
 # Guia de uso
 
-Adapter opcional de fila Redis para o framework Elavora.
-
 ## Instalacao
 
 ```bash
-composer require elavora/api-queue-redis
+composer require elavora/api-queue-redis:^1.0
 ```
 
-## Quando usar
+Requisitos de runtime:
 
-- Publicar ou consumir tarefas assincronas.
-- Esconder detalhes do backend de fila atras dos contratos do framework.
-- Reutilizar workers e handlers em ambientes diferentes.
+- PHP `>=8.3`
+- `ext-redis`
+- `elavora/api-framework` `^1.0`
+- `elavora/api-redis` `^1.0`
 
-## Exemplo rapido
+## Registro
 
 ```php
 use Elavora\Api\Extension\QueueRedis\RedisQueueExtension;
 
 $application->extend(new RedisQueueExtension([
+    'host' => getenv('REDIS_HOST') ?: '127.0.0.1',
+    'port' => getenv('REDIS_PORT') ?: '6379',
+    'password' => getenv('REDIS_PASSWORD') ?: null,
+    'database' => getenv('REDIS_DATABASE') ?: '0',
     'prefix' => 'app:queue:',
 ]));
 ```
 
-## Principais pontos de entrada
+As opcoes de conexao seguem as validacoes de `RedisConfig`, e `prefix` deve ser
+string.
 
-- `Elavora\Api\Extension\QueueRedis\RedisQueue`
-- `Elavora\Api\Extension\QueueRedis\RedisQueueExtension`
+`push()` considera somente um retorno inteiro positivo de `rPush` como
+sucesso. `false` e zero geram `RuntimeException`; a mensagem identifica a fila
+sem incluir o payload. `pop()` retorna `null` para fila vazia e rejeita payload
+que nao respeite o formato `array<string, mixed>`.
 
-## Dependencias de runtime
-
-- `ext-redis` `*`
-- `elavora/api-framework` `^0.3.1`
-- `elavora/api-redis` `^0.1`
-
-## Validacao no projeto consumidor
-
-Depois de instalar o pacote, rode os testes da aplicacao consumidora. Para uma verificacao isolada do pacote, use container:
+## Qualidade
 
 ```bash
-docker run --rm -v "${PWD}:/workspace" -w "/workspace/api-queue-redis" composer:2 composer validate --strict --no-check-publish
-docker run --rm -v "${PWD}:/workspace" -w "/workspace/api-queue-redis" composer:2 sh -lc "find . \\( -path ./.git -o -path ./vendor \\) -prune -o -name '*.php' -print0 | xargs -0 -r -n1 php -l"
+composer validate --strict --no-check-publish
+composer lint
+composer analyse
+composer test
+composer check
 ```
 
-## Observacoes
-
-- Mantenha regras de produto fora deste pacote.
-- Prefira configurar extensoes no bootstrap da aplicacao.
-- Instale apenas os modulos que a aplicacao realmente usa.
+`composer check` executa lint portatil, PHPStan nivel 8 e PHPUnit.
