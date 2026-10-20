@@ -230,31 +230,30 @@ docker run --rm -v "${PWD}:/origem" -w /origem ghcr.io/elavora/php-dev:8.3-lates
 O `api-redis` `1.0.0` ainda não está no Packagist. Use o clone local dele como repositório `path`,
 **só no comando**. Nada disso vai para o `composer.json` commitado.
 
-O comando abaixo:
+Tudo acontece dentro do container. Nada é apagado nem alterado nas pastas do Windows, que são montadas
+só para leitura. O comando:
 
-1. Exporta a branch `feat/framework-2` do `api-redis` com `git archive` (só o que está commitado).
-2. Copia este repo para `/tmp/pacote` dentro do container, para não mexer no `composer.json` da pasta.
-3. Adiciona o repositório `path` na cópia, declarando a versão `1.0.0`.
-4. Instala e roda os testes.
+1. Faz `git clone` deste repo para `/tmp/pacote`. O clone não traz `vendor/` nem `composer.lock`.
+2. Faz `git clone` da branch `feat/framework-2` do `api-redis` para `/tmp/api-redis`.
+3. Copia o `composer.json` para `composer.local.json` e põe o repositório `path` só nessa cópia,
+   declarando a versão `1.0.0`. O `composer.json` fica limpo. Isso importa: um teste confere que ele
+   não tem repositório `path`.
+4. Instala com `COMPOSER=composer.local.json`, valida o `composer.json` e roda os testes.
 
 No PowerShell, na pasta deste repo, com o `api-redis` clonado ao lado (`..\api-redis`):
 
 ```powershell
-$redis = Join-Path $env:TEMP "api-redis-1.0"
-Remove-Item -Recurse -Force $redis -ErrorAction SilentlyContinue
-New-Item -ItemType Directory $redis | Out-Null
-git -C ..\api-redis archive feat/framework-2 -o "$redis\api-redis.tar"
-tar -xf "$redis\api-redis.tar" -C $redis
-Remove-Item "$redis\api-redis.tar"
-docker run --rm -v "${PWD}:/origem:ro" -v "${redis}:/api-redis:ro" ghcr.io/elavora/php-dev:8.3-latest sh -lc 'cp -r /origem /tmp/pacote && cd /tmp/pacote && rm -rf vendor composer.lock && composer config repositories.api-redis "{\"type\":\"path\",\"url\":\"/api-redis\",\"options\":{\"symlink\":false,\"versions\":{\"elavora/api-redis\":\"1.0.0\"}}}" && composer validate --strict --no-check-publish && composer update --no-interaction --ignore-platform-req=ext-redis && composer test'
+docker run --rm -v "${PWD}:/origem:ro" -v "${PWD}/../api-redis:/api-redis-origem:ro" ghcr.io/elavora/php-dev:8.3-latest sh -lc 'git config --global --add safe.directory "*" && git clone -q /origem /tmp/pacote && git clone -q -b feat/framework-2 /api-redis-origem /tmp/api-redis && cd /tmp/pacote && cp composer.json composer.local.json && export COMPOSER=composer.local.json && composer config repositories.api-redis "{\"type\":\"path\",\"url\":\"/tmp/api-redis\",\"options\":{\"symlink\":false,\"versions\":{\"elavora/api-redis\":\"1.0.0\"}}}" && composer update --no-interaction --ignore-platform-req=ext-redis && unset COMPOSER && composer validate --strict --no-check-publish && composer test'
 ```
 
-O comando só resolve as dependências quando a branch `feat/framework-2` do `api-redis` já tiver
-commitado o `composer.json` com `elavora/api-framework` `^2.0`. Antes disso, o Composer acusa conflito
-entre `^0.3.1` (do `api-redis`) e `^2.0` (deste pacote).
+O `git clone` pega só o que está **commitado** nos dois repos. Commite antes de validar.
 
-O `composer validate` roda na cópia com o repositório `path`. Na pasta original, sem ele, rode
-`composer validate --strict --no-check-publish` à parte: ele não depende do Packagist.
+Enquanto o `composer.json` commitado deste repo ainda pedir `elavora/api-redis` `^0.1`, o Composer
+recusa a resolução: o repositório `path` só oferece a `1.0.0`. Isso some quando o `composer.json`
+seguir a seção "`composer.json`" acima.
+
+O `safe.directory "*"` evita o erro de dono diferente do Git com pastas montadas. Vale só dentro do
+container, que é descartado no fim.
 
 ## Observações
 
