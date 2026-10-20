@@ -4,78 +4,168 @@ declare(strict_types=1);
 
 use Elavora\Api\Extension\QueueRedis\RedisQueue;
 use Elavora\Api\Extension\QueueRedis\RedisQueueExtension;
-use Elavora\Api\Extension\Redis\Contracts\RedisClient;
 use Elavora\Api\Extension\Redis\Contracts\RedisConnectionFactory;
-use Elavora\Api\Extension\Redis\RedisConfig;
+use Elavora\Api\Extension\Redis\RedisConnectionManager;
 use Elavora\Api\Framework\Application;
+use Elavora\Api\Framework\Contracts\Extension;
 use Elavora\Api\Framework\Contracts\Queue;
 use PHPUnit\Framework\TestCase;
 
 final class RedisQueueExtensionTest extends TestCase
 {
-    public function testUsesSharedRedisConnectionFactory(): void
+    /**
+     * @param array<string, mixed> $config
+     * @return array{0: Application, 1: CountingConnectionFactory}
+     */
+    private function boot(array $config): array
     {
-        $factory = new QueueRedisCountingConnectionFactory();
+        $factory = new CountingConnectionFactory();
         $application = Application::create();
         $application->container()->instance(RedisConnectionFactory::class, $factory);
+        $application->extend(new RedisQueueExtension($config));
 
-        $application->extend(new RedisQueueExtension([
+        return [$application, $factory];
+    }
+
+    public function testImplementsExtensionContractAndIsFinal(): void
+    {
+        self::assertInstanceOf(Extension::class, new RedisQueueExtension([]));
+        self::assertTrue((new ReflectionClass(RedisQueueExtension::class))->isFinal());
+    }
+
+    public function testUsesSharedRedisConnectionFactory(): void
+    {
+        [$application, $factory] = $this->boot([
             'host' => 'redis',
             'port' => 6379,
             'database' => 0,
             'prefix' => 'queue:',
-        ]));
+        ]);
 
         self::assertInstanceOf(RedisQueue::class, $application->container()->get(Queue::class));
         self::assertSame(1, $factory->connections);
         self::assertSame('redis', $factory->lastConfig?->host);
+        self::assertSame(6379, $factory->lastConfig?->port);
         self::assertSame(0, $factory->lastConfig?->database);
     }
-}
 
-final class QueueRedisCountingConnectionFactory implements RedisConnectionFactory
-{
-    public int $connections = 0;
-    public ?RedisConfig $lastConfig = null;
-
-    public function connect(RedisConfig $config): RedisClient
+    public function testAcceptsFramework2ConfigFormat(): void
     {
-        $this->connections++;
-        $this->lastConfig = $config;
+        [$application, $factory] = $this->boot([
+            'host' => 'redis',
+            'port' => 6379,
+            'password' => 'secret',
+            'database' => '7',
+            'prefix' => 'api:queue:',
+        ]);
 
-        return new QueueRedisFakeClient();
-    }
-}
+        $application->container()->get(Queue::class);
 
-final class QueueRedisFakeClient implements RedisClient
-{
-    public function get(string $key): string|false
-    {
-        return false;
+        self::assertSame(1, $factory->connections);
+        self::assertSame('secret', $factory->lastConfig?->password);
+        self::assertSame(7, $factory->lastConfig?->database);
     }
 
-    public function set(string $key, string $value): bool
+    public function testNullPasswordAndDatabaseStayNull(): void
     {
-        return true;
+        [$application, $factory] = $this->boot([
+            'host' => 'redis',
+            'port' => 6379,
+            'password' => null,
+            'database' => null,
+            'prefix' => 'api:queue:',
+        ]);
+
+        $application->container()->get(Queue::class);
+
+        self::assertNull($factory->lastConfig?->password);
+        self::assertNull($factory->lastConfig?->database);
     }
 
-    public function setex(string $key, int $ttlSeconds, string $value): bool
+    public function testEmptyConfigUsesRedisConfigDefaults(): void
     {
-        return true;
+        [$application, $factory] = $this->boot([]);
+
+        $application->container()->get(Queue::class);
+
+        self::assertSame(1, $factory->connections);
+        self::assertSame('127.0.0.1', $factory->lastConfig?->host);
+        self::assertSame(6379, $factory->lastConfig?->port);
     }
 
-    public function del(string ...$keys): int|false
+    public function testConstructorDoesNotConnect(): void
     {
-        return count($keys);
+        $factory = new CountingConnectionFactory();
+        $application = Application::create();
+        $application->container()->instance(RedisConnectionFactory::class, $factory);
+
+        new RedisQueueExtension(['host' => 'redis']);
+
+        self::assertSame(0, $factory->connections);
     }
 
-    public function rPush(string $key, string $value): int|false
+    public function testRegisterAloneDoesNotConnect(): void
     {
-        return 1;
+        [, $factory] = $this->boot(['host' => 'redis', 'prefix' => 'queue:']);
+
+        self::assertSame(0, $factory->connections);
     }
 
-    public function lPop(string $key): string|false
+    public function testRepeatedGetReturnsSameInstanceWithSingleConnection(): void
     {
-        return false;
+        [$application, $factory] = $this->boot(['host' => 'redis', 'prefix' => 'queue:']);
+
+        $first = $application->container()->get(Queue::class);
+        $second = $application->container()->get(Queue::class);
+
+        self::assertSame($first, $second);
+        self::assertSame(1, $factory->connections);
+    }
+
+    public function testKeepsFactoryRegisteredBeforeExtend(): void
+    {
+        [$application, $factory] = $this->boot(['prefix' => 'queue:']);
+
+        self::assertSame($factory, $application->container()->get(RedisConnectionFactory::class));
+    }
+
+    public function testQueueUsesClientFromFactoryWithPrefix(): void
+    {
+        [$application, $factory] = $this->boot(['prefix' => 'queue:']);
+
+        $application->container()->get(Queue::class)->push('jobs', ['a' => 1]);
+
+        self::assertSame([['queue:jobs', serialize(['a' => 1])]], $factory->client->rPushCalls);
+    }
+
+    public function testQueueWithoutPrefixUsesQueueNameAsKey(): void
+    {
+        [$application, $factory] = $this->boot([]);
+
+        $application->container()->get(Queue::class)->push('jobs', ['a' => 1]);
+
+        self::assertSame('jobs', $factory->client->rPushCalls[0][0] ?? null);
+    }
+
+    public function testQueueFromContainerRoundTripsThroughFakeClient(): void
+    {
+        [$application] = $this->boot(['prefix' => 'app:queue:']);
+        $queue = $application->container()->get(Queue::class);
+
+        $queue->push('emails', ['para' => 'ana@exemplo.com']);
+
+        self::assertSame(['para' => 'ana@exemplo.com'], $queue->pop('emails'));
+        self::assertNull($queue->pop('emails'));
+    }
+
+    public function testRegistersRedisConnectionManagerWhenNoFactoryWasRegistered(): void
+    {
+        $application = Application::create();
+        $application->extend(new RedisQueueExtension(['host' => 'redis']));
+
+        self::assertInstanceOf(
+            RedisConnectionManager::class,
+            $application->container()->get(RedisConnectionFactory::class),
+        );
     }
 }

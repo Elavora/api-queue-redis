@@ -7,8 +7,18 @@ use Elavora\Api\Framework\Application;
 use Elavora\Api\Framework\Contracts\Queue;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Integração com Redis real. Pulado quando ext-redis não está carregada.
+ */
 final class RedisQueueTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        if (!extension_loaded('redis')) {
+            self::markTestSkipped('ext-redis não está carregada; teste com Redis real pulado.');
+        }
+    }
+
     public function testPushesAndPopsPayload(): void
     {
         $application = Application::create()->extend(new RedisQueueExtension([
