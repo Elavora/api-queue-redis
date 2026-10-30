@@ -16,9 +16,8 @@ final class RedisQueue implements Queue
      */
     public function __construct(
         private readonly RedisClient $redis,
-        private readonly string $prefix = ''
-    ) {
-    }
+        private readonly string $prefix = '',
+    ) {}
 
     /**
      * Enfileira um payload serializavel.
