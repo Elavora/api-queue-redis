@@ -14,8 +14,9 @@ Este guia é a especificação do pacote. Tudo o que um teste precisa saber est�
 | PHP | `>=8.3` |
 | `ext-redis` | `*` |
 
-A `1.0.0` sai pelo PR com label `upgrade`. O workflow `tag_on_merge` sobe o major da
-última tag (`v0.2.0`) e cria `v1.0.0`.
+A `1.0.0` sai do PR único de upgrade e adoção do pipeline central, com as labels `upgrade` e `release`. O
+fluxo central sobe o major da última tag legada (`v0.2.0`, que conta como `0.2.0`) e publica a `1.0.0`
+([Versões e release](AUTOMACAO.md#versões-e-release)).
 
 Não existe compatibilidade com o framework `0.x` nem `1.x`. A versão `0.2.0` deste pacote
 continua sendo a última para o framework `^0.3.1`.
@@ -31,14 +32,6 @@ O `composer.json` do pacote deve ter:
 - `extra.branch-alias.dev-main` = `"1.0-dev"`
 - `autoload.psr-4` = `"Elavora\\Api\\Extension\\QueueRedis\\": "src/"` (sem mudança)
 - `composer validate --strict --no-check-publish` sem erros.
-
-### Ordem de merge
-
-1. Primeiro o PR do `elavora/api-redis` (`1.0.0`). Espere a `1.0.0` aparecer no Packagist.
-2. Depois o PR deste pacote.
-
-Antes disso, o `composer update` normal falha, porque `elavora/api-redis` `^1.0` ainda não existe
-no Packagist. Para validar nesse meio-tempo, use o comando de "Validação local antes da api-redis 1.0.0".
 
 ### O que muda com o framework 2
 
@@ -208,53 +201,18 @@ uma conexão real com `ext-redis`, então isso fica fora dos testes unitários.
 
 ## Validação local
 
-Os testes rodam no container `ghcr.io/elavora/php-dev:8.3-latest`, que já tem PHP 8.3 e Composer.
-Monte o repo em `/origem`. Não use `/src`.
+Os testes rodam no container `ghcr.io/elavora/php-dev:8.3-latest`, que já traz `ext-redis`. Os testes unitários usam
+factory e cliente falsos: não precisam de servidor Redis. O teste com Redis real (`tests/RedisQueueTest.php`) só roda
+quando há `ext-redis` **e** um servidor Redis acessível em `REDIS_HOST` (padrão `redis`) e `REDIS_PORT` (padrão
+`6379`). Sem servidor, ele é pulado (`markTestSkipped`) e não falha a suíte. Veja
+[`ext-redis` e os testes no CI](AUTOMACAO.md#ext-redis-e-os-testes-no-ci).
 
-A imagem não tem `ext-redis`. Por isso o `composer update` usa `--ignore-platform-req=ext-redis`.
-Os testes unitários usam factory e cliente falsos e não tocam na classe `Redis`.
-
-Um teste que precise de Redis real deve ser pulado (`markTestSkipped`) quando
-`extension_loaded('redis')` for `false`.
-
-### Depois da api-redis 1.0.0 no Packagist
-
-No PowerShell, na pasta do repo:
+O comando completo, igual ao do CI, está em [Desenvolvimento e testes](DESENVOLVIMENTO.md#validar-como-o-ci). Para só
+rodar a suíte, no PowerShell, na raiz do repo:
 
 ```powershell
-docker run --rm -v "${PWD}:/origem" -w /origem ghcr.io/elavora/php-dev:8.3-latest sh -lc "composer validate --strict --no-check-publish && composer update --no-interaction --ignore-platform-req=ext-redis && composer test"
+docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" -w /workspace ghcr.io/elavora/php-dev:8.3-latest sh -lc 'git config --global --add safe.directory /workspace && composer install --no-interaction --prefer-dist && composer test'
 ```
-
-### Validação local antes da api-redis 1.0.0
-
-O `api-redis` `1.0.0` ainda não está no Packagist. Use o clone local dele como repositório `path`,
-**só no comando**. Nada disso vai para o `composer.json` commitado.
-
-Tudo acontece dentro do container. Nada é apagado nem alterado nas pastas do Windows, que são montadas
-só para leitura. O comando:
-
-1. Faz `git clone` deste repo para `/tmp/pacote`. O clone não traz `vendor/` nem `composer.lock`.
-2. Faz `git clone` da branch `feat/framework-2` do `api-redis` para `/tmp/api-redis`.
-3. Copia o `composer.json` para `composer.local.json` e põe o repositório `path` só nessa cópia,
-   declarando a versão `1.0.0`. O `composer.json` fica limpo. Isso importa: um teste confere que ele
-   não tem repositório `path`.
-4. Instala com `COMPOSER=composer.local.json`, valida o `composer.json` e roda os testes.
-
-No PowerShell, na pasta deste repo, com o `api-redis` clonado ao lado (`..\api-redis`):
-
-```powershell
-docker run --rm -v "${PWD}:/origem:ro" -v "${PWD}/../api-redis:/api-redis-origem:ro" ghcr.io/elavora/php-dev:8.3-latest sh -lc 'git config --global --add safe.directory "*" && git clone -q /origem /tmp/pacote && git clone -q -b feat/framework-2 /api-redis-origem /tmp/api-redis && cd /tmp/pacote && cp composer.json composer.local.json && export COMPOSER=composer.local.json && composer config repositories.api-redis "{\"type\":\"path\",\"url\":\"/tmp/api-redis\",\"options\":{\"symlink\":false,\"versions\":{\"elavora/api-redis\":\"1.0.0\"}}}" && composer update --no-interaction --ignore-platform-req=ext-redis && unset COMPOSER && composer validate --strict --no-check-publish && composer test'
-```
-
-O `git clone` pega só o que está **commitado** nos dois repos. Commite antes de validar.
-
-Enquanto o `composer.json` commitado deste repo ainda pedir `elavora/api-redis` `^0.1`, o Composer
-recusa a resolução: o repositório `path` só oferece a `1.0.0`. Isso some quando o `composer.json`
-seguir a seção "`composer.json`" acima.
-
-O `safe.directory "*"` evita o erro de dono diferente do Git com pastas montadas. Vale só dentro do
-container, que é descartado no fim.
-
 ## Observações
 
 - Mantenha regras de produto fora deste pacote.
