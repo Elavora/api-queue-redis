@@ -11,6 +11,7 @@ use Elavora\Api\Framework\Application;
 use Elavora\Api\Framework\Container;
 use Elavora\Api\Framework\Contracts\Extension;
 use Elavora\Api\Framework\Contracts\Queue;
+use LogicException;
 
 final class RedisQueueExtension implements Extension
 {
@@ -36,9 +37,26 @@ final class RedisQueueExtension implements Extension
         $application->container()->bind(
             Queue::class,
             fn(Container $container): RedisQueue => new RedisQueue(
-                redis: $container->get(RedisConnectionFactory::class)->connect($this->redisConfig),
+                redis: $this->connectionFactory($container)->connect($this->redisConfig),
                 prefix: $this->prefix,
             ),
         );
+    }
+
+    /**
+     * Obtém a factory Redis do container, garantindo o contrato esperado.
+     */
+    private function connectionFactory(Container $container): RedisConnectionFactory
+    {
+        $factory = $container->get(RedisConnectionFactory::class);
+
+        if (!$factory instanceof RedisConnectionFactory) {
+            throw new LogicException(sprintf(
+                'O binding de %s deve resolver uma instancia dessa interface.',
+                RedisConnectionFactory::class,
+            ));
+        }
+
+        return $factory;
     }
 }
