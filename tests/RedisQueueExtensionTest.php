@@ -158,6 +158,21 @@ final class RedisQueueExtensionTest extends TestCase
         self::assertNull($queue->pop('emails'));
     }
 
+    public function testInvalidFactoryBindingThrowsLogicExceptionOnlyWhenResolvingQueue(): void
+    {
+        $application = Application::create();
+        $application->container()->instance(RedisConnectionFactory::class, new stdClass());
+
+        $application->extend(new RedisQueueExtension([]));
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage(
+            'O binding de Elavora\Api\Extension\Redis\Contracts\RedisConnectionFactory deve resolver uma instancia dessa interface.',
+        );
+
+        $application->container()->get(Queue::class);
+    }
+
     public function testRegistersRedisConnectionManagerWhenNoFactoryWasRegistered(): void
     {
         $application = Application::create();
