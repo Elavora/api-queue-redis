@@ -18,9 +18,7 @@ final class InMemoryRedisClient implements RedisClient
     /** @var list<string> */
     public array $lPopCalls = [];
 
-    public function __construct(private readonly int|false|null $rPushResult = null)
-    {
-    }
+    public function __construct(private readonly int|false|null $rPushResult = null) {}
 
     public function get(string $key): string|false
     {

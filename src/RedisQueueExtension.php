@@ -35,10 +35,10 @@ final class RedisQueueExtension implements Extension
 
         $application->container()->bind(
             Queue::class,
-            fn (Container $container): RedisQueue => new RedisQueue(
+            fn(Container $container): RedisQueue => new RedisQueue(
                 redis: $container->get(RedisConnectionFactory::class)->connect($this->redisConfig),
-                prefix: $this->prefix
-            )
+                prefix: $this->prefix,
+            ),
         );
     }
 }
