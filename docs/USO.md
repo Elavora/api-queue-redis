@@ -199,6 +199,23 @@ Sem factory registrada antes, `get(RedisConnectionFactory::class)` depois do `ex
 `Elavora\Api\Extension\Redis\RedisConnectionManager`. Pedir `get(Queue::class)` nesse caso abre
 uma conexão real com `ext-redis`, então isso fica fora dos testes unitários.
 
+#### Binding inválido
+
+Se o binding de `RedisConnectionFactory::class` resolver um valor que não implementa a interface, o
+`get(Queue::class)` lança `LogicException` (e não um erro fatal do PHP), com a mensagem exata:
+
+```text
+O binding de Elavora\Api\Extension\Redis\Contracts\RedisConnectionFactory deve resolver uma instancia dessa interface.
+```
+
+- A mensagem não tem acento em `instancia`.
+- O erro aparece só ao resolver a `Queue`: `register()` não resolve a factory e não lança exceção.
+- Nenhuma conexão é aberta e nenhum `RedisQueue` é criado.
+
+| Cenário | Resultado |
+|---|---|
+| `instance(RedisConnectionFactory::class, new stdClass())`, `extend(new RedisQueueExtension([]))`, `get(Queue::class)` | `LogicException` com a mensagem acima |
+| `instance(RedisConnectionFactory::class, ...)` com uma `RedisConnectionFactory` válida | sem erro (cenários da seção anterior) |
 ## Validação local
 
 Os testes rodam no container `ghcr.io/elavora/php-dev:8.3-latest`, que já traz `ext-redis`. Os testes unitários usam
