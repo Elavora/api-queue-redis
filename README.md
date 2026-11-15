@@ -8,7 +8,7 @@
 
 Adapter opcional de fila Redis para o framework Elavora 2.
 
-- Versão `1.0.0`: exige `elavora/api-framework` `^3.0`, `elavora/api-redis` `^1.0`, PHP `>=8.3` e `ext-redis`.
+- Versão `1.0.0`: exige `elavora/api-framework` `^3.0`, `elavora/api-redis` `^2.0`, PHP `>=8.3` e `ext-redis`.
 - Para o framework `^0.3.1`, use a versão `0.2.0`.
 
 ## Instalação
@@ -18,7 +18,7 @@ composer require elavora/api-queue-redis:^1.0
 ```
 
 Requisitos: PHP `>=8.3`, `ext-redis`, `elavora/api-framework` `^3.0` e
-`elavora/api-redis` `^1.0`.
+`elavora/api-redis` `^2.0`.
 
 ## Uso
 
