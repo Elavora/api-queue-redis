@@ -33,9 +33,9 @@ final class ComposerJsonTest extends TestCase
         self::assertSame('^3.0', $this->composer['require']['elavora/api-framework'] ?? null);
     }
 
-    public function testRequiresApiRedis1(): void
+    public function testRequiresApiRedis2(): void
     {
-        self::assertSame('^1.0', $this->composer['require']['elavora/api-redis'] ?? null);
+        self::assertSame('^2.0', $this->composer['require']['elavora/api-redis'] ?? null);
     }
 
     public function testBranchAliasIs20Dev(): void
