@@ -11,7 +11,7 @@ Este guia é a especificação do pacote. Tudo o que um teste precisa saber est�
 | Versão deste pacote | `1.0.0` (primeira versão compatível com o framework 2) |
 | `elavora/api-framework` | `^2.0` |
 | `elavora/api-redis` | `^1.0` |
-| PHP | `>=8.3` |
+| PHP | `>=8.4` |
 | `ext-redis` | `*` |
 
 A `1.0.0` sai do PR único de upgrade e adoção do pipeline central, com as labels `upgrade` e `release`. O
@@ -25,7 +25,7 @@ continua sendo a última para o framework `^0.3.1`.
 
 O `composer.json` do pacote deve ter:
 
-- `require.php` = `">=8.3"`
+- `require.php` = `">=8.4"`
 - `require.ext-redis` = `"*"`
 - `require.elavora/api-framework` = `"^2.0"`
 - `require.elavora/api-redis` = `"^1.0"`
@@ -44,7 +44,7 @@ Para este pacote, quase nada muda no código. O contrato de extensão do framewo
 - `Elavora\Api\Framework\Contracts\Queue` continua com `push(string $queue, array $payload): void`
   e `pop(string $queue): ?array`.
 
-A mudança real é de versão: o framework 2 exige PHP 8.3. Por isso este pacote também passa a exigir PHP 8.3.
+A mudança real é de versão: o framework 2 exige PHP 8.4. Por isso este pacote também passa a exigir PHP 8.4.
 
 ### Registro automático pelo framework
 
@@ -218,7 +218,7 @@ O binding de Elavora\Api\Extension\Redis\Contracts\RedisConnectionFactory deve r
 | `instance(RedisConnectionFactory::class, ...)` com uma `RedisConnectionFactory` válida | sem erro (cenários da seção anterior) |
 ## Validação local
 
-Os testes rodam no container `ghcr.io/elavora/php-dev:8.3-latest`, que já traz `ext-redis`. Os testes unitários usam
+Os testes rodam no container `ghcr.io/elavora/php-dev:8.4-latest`, que já traz `ext-redis`. Os testes unitários usam
 factory e cliente falsos: não precisam de servidor Redis. O teste com Redis real (`tests/RedisQueueTest.php`) só roda
 quando há `ext-redis` **e** um servidor Redis acessível em `REDIS_HOST` (padrão `redis`) e `REDIS_PORT` (padrão
 `6379`). Sem servidor, ele é pulado (`markTestSkipped`) e não falha a suíte. Veja
@@ -228,7 +228,7 @@ O comando completo, igual ao do CI, está em [Desenvolvimento e testes](DESENVOL
 rodar a suíte, no PowerShell, na raiz do repo:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" -w /workspace ghcr.io/elavora/php-dev:8.3-latest sh -lc 'git config --global --add safe.directory /workspace && composer install --no-interaction --prefer-dist && composer test'
+docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" -w /workspace ghcr.io/elavora/php-dev:8.4-latest sh -lc 'git config --global --add safe.directory /workspace && composer install --no-interaction --prefer-dist && composer test'
 ```
 ## Observações
 
