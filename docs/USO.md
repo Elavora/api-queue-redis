@@ -155,6 +155,8 @@ Fila Redis com **confirmação (ack) e prazo de visibilidade**: resolve o job qu
 do processamento. Requer `elavora/api-framework` `^6.4` (que traz `AcknowledgesJobs` e `ReservedJob`) e
 `elavora/api-redis` `^3.1` (que traz `RedisListOperations`). Redis 6.2 ou superior (`LMOVE`).
 
+A `ReliableRedisQueue` existe desde a versão `3.1.0`.
+
 ```php
 public function __construct(RedisListOperations $redis, string $prefix = '', int $visibilityTimeout = 300);
 public function push(string $queue, array $payload): void;          // igual ao RedisQueue
