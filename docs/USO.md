@@ -61,6 +61,7 @@ O framework chama `new RedisQueueExtension($config)` com este array:
 | `REDIS_PASSWORD` | `password` (string) | `null` |
 | `REDIS_DATABASE` | `database` (string, ex.: `'7'`) | `null` |
 | `QUEUE_PREFIX` | `prefix` (string) | `'api:queue:'` |
+| `QUEUE_VISIBILITY_TIMEOUT` | `visibility_timeout` (int, segundos) | `300` (só nas versões do framework que a repassam: `^6.4`) |
 
 Este pacote **não lê** variáveis de ambiente. Ele só recebe o array.
 O construtor precisa aceitar esse formato sem erro: `database` como string numérica e a chave `prefix`.
@@ -148,6 +149,87 @@ Exemplos com um cliente falso que guarda listas em memória:
 
 Strings que não são um `serialize()` válido ficam fora desta especificação. Não teste esse caso.
 
+### `ReliableRedisQueue` (classe final, implementa `Queue` e `Elavora\Api\Framework\Contracts\AcknowledgesJobs`)
+
+Fila Redis com **confirmação (ack) e prazo de visibilidade**: resolve o job que se perdia quando o worker caía no meio
+do processamento. Requer `elavora/api-framework` `^6.4` (que traz `AcknowledgesJobs` e `ReservedJob`) e
+`elavora/api-redis` `^3.1` (que traz `RedisListOperations`). Redis 6.2 ou superior (`LMOVE`).
+
+```php
+public function __construct(RedisListOperations $redis, string $prefix = '', int $visibilityTimeout = 300);
+public function push(string $queue, array $payload): void;          // igual ao RedisQueue
+public function pop(string $queue): ?array;                          // igual ao RedisQueue (LPOP, sem ack)
+public function reserve(array $queues): ?ReservedJob;
+public function acknowledge(ReservedJob $job): void;
+public function extend(ReservedJob $job, ?int $seconds = null): void;
+public function recoverExpired(string $queue): int;
+```
+
+`$visibilityTimeout` menor que 1 lança `InvalidArgumentException` com `O prazo de visibilidade deve ser maior que zero.`
+
+O contrato (regras de `reserve`, `acknowledge`, `extend` e `recoverExpired`) está no guia do `api-framework`
+(seção "Fila com confirmação"). Aqui ficam os detalhes do Redis.
+
+#### Chaves
+
+Para a fila `$queue` e o prefixo `$prefix` (todas sem separador extra):
+
+| Chave | Tipo | Conteúdo |
+|---|---|---|
+| `$prefix . $queue` | lista | mensagens esperando, como no `RedisQueue` (`rPush` na entrada, início da lista na saída) |
+| `$prefix . $queue . ':processing'` | lista | mensagens reservadas (em processamento) |
+| `$prefix . $queue . ':lease:' . sha1($mensagem)` | string `'1'` com TTL | prazo de visibilidade da mensagem reservada |
+
+`$mensagem` é a string `serialize($payload)` guardada na lista. Não use nomes de fila que terminem em `:processing`
+nem que contenham `:lease:`, para não colidir com as chaves internas.
+
+#### `push()` e `pop()`
+
+Idênticos ao `RedisQueue`: `push()` faz `rPush($chave, serialize($payload))` e `pop()` faz `lPop($chave)`. O `pop()`
+**não** reserva: quem quer ack usa `reserve()`.
+
+#### `reserve(array $queues)`
+
+Para cada fila, na ordem recebida:
+
+1. Chama `recoverExpired($fila)`.
+2. Chama `lMove($chave, $chave . ':processing', 'LEFT', 'RIGHT')`. `false` (fila vazia) → passa para a próxima fila.
+3. Grava a chave de lease com `setex($lease, $visibilityTimeout, '1')`.
+4. `unserialize()` com `['allowed_classes' => false]`:
+   - array → devolve `ReservedJob(queue: $fila, payload: $array, token: $mensagem)`.
+   - não é array → descarta a mensagem da lista de processamento (como o `acknowledge()`) e lança
+     `UnexpectedValueException` com `Payload invalido recebido da fila Redis.`
+
+Todas vazias → `null`. Lista de filas vazia → `InvalidArgumentException` (`A lista de filas nao pode ser vazia.`).
+
+#### `acknowledge(ReservedJob $job)`
+
+`lRem($processing, $token, 1)`. Depois, se `lRange($processing, 0, -1)` não tem mais o `$token` (nenhuma mensagem idêntica
+em processamento), apaga a chave de lease com `del()`. Reserva inexistente: nada acontece.
+
+#### `extend(ReservedJob $job, ?int $seconds = null)`
+
+`$seconds` menor que 1 lança `InvalidArgumentException` (`O prazo de visibilidade deve ser maior que zero.`).
+Se o `$token` está na lista de processamento, regrava o lease com `setex($lease, $seconds ?? $visibilityTimeout, '1')`.
+Se não está (já confirmada ou já devolvida à fila), não faz nada.
+
+#### `recoverExpired(string $queue)`
+
+Lê `lRange($processing, 0, -1)`. Para cada mensagem **sem** lease (`get($lease)` devolve `false`), da mais nova para a
+mais antiga, faz `lRem($processing, $mensagem, 1)` e, se removeu, `lPush($chave, $mensagem)`: as devolvidas ficam no
+início da fila, na ordem original. Devolve quantas voltaram.
+
+#### Garantias e limites
+
+- **Pelo menos uma vez.** Uma mensagem pode rodar duas vezes (worker caiu depois de processar e antes do `ack`; prazo
+  curto demais para um job longo). Handlers devem ser idempotentes.
+- Entre o `lMove` e o `setex` do `reserve()` há uma janela de microssegundos sem lease. Se outro worker rodar
+  `recoverExpired()` exatamente aí, ele devolve a mensagem e ela pode ser processada duas vezes.
+- Mensagens idênticas (mesmo `serialize`) em processamento ao mesmo tempo dividem o mesmo lease; o `extend` de uma
+  renova as duas.
+- Jobs longos (como uma hora): ou configure `QUEUE_VISIBILITY_TIMEOUT` maior que o pior caso, ou chame `extend()`
+  periodicamente durante o processamento.
+
 ### `RedisQueueExtension` (classe final, implementa `Elavora\Api\Framework\Contracts\Extension`)
 
 ```php
@@ -166,6 +248,9 @@ Aceita as chaves `host`, `port`, `timeout`, `password`, `database` e `prefix`.
   - `database` como string numérica vira int: `'7'` → `7`, `'0'` → `0`.
   - `prefix` e outras chaves desconhecidas não atrapalham.
 - `prefix` é convertido para string. Ausente → `''`.
+- `visibility_timeout` é o prazo de visibilidade em segundos da `ReliableRedisQueue`. Ausente ou `null` → `300`.
+  Aceita int ou string numérica (`'600'` → `600`). Menor que 1 ou não numérico lança `InvalidArgumentException` com
+  `visibility_timeout deve ser um inteiro maior que zero.`
 - O construtor não abre conexão.
 
 #### `register()`
@@ -180,6 +265,10 @@ A conexão é aberta só quando alguém pede `container()->get(Queue::class)`:
 - O primeiro `get(Queue::class)` chama `connect()` da factory **uma vez**, com o `RedisConfig`
   montado no construtor, e devolve um `RedisQueue` com o cliente recebido e o `prefix`.
 - Chamadas seguintes de `get(Queue::class)` devolvem a mesma instância, sem novo `connect()`.
+- **Qual classe vem no `Queue::class`:** se o `elavora/api-framework` instalado tem `AcknowledgesJobs` (`^6.4`) **e** o
+  cliente devolvido pela factory implementa `RedisListOperations` (o `NativeRedisClient` do `api-redis` `^3.1`
+  implementa), o resultado é uma `ReliableRedisQueue` com o `visibility_timeout`. Caso contrário é um `RedisQueue`,
+  como antes (sem ack). Nos dois casos `push()` e `pop()` se comportam igual, então a atualização é compatível.
 
 Exemplos, com uma factory falsa `$f` registrada antes por
 `container()->instance(RedisConnectionFactory::class, $f)`:
@@ -194,6 +283,10 @@ Exemplos, com uma factory falsa `$f` registrada antes por
 | `get(Queue::class)` duas vezes | mesma instância; `$f` chamada 1 vez |
 | `['prefix' => 'queue:']`, `push('jobs', ['a' => 1])` pela fila do container | o cliente devolvido por `$f` recebe `rPush('queue:jobs', ...)` |
 | sem `prefix`, `push('jobs', ['a' => 1])` | o cliente recebe `rPush('jobs', ...)` |
+| a factory devolve um cliente `RedisListOperations`, `['visibility_timeout' => 600]` | `get(Queue::class)` é `ReliableRedisQueue` (e `AcknowledgesJobs`), com prazo `600`; `reserve(['jobs'])` grava o lease com `setex(..., 600, '1')` |
+| a factory devolve um cliente `RedisListOperations`, sem `visibility_timeout` | `ReliableRedisQueue` com prazo `300` |
+| a factory devolve um cliente que só implementa `RedisClient` | `get(Queue::class)` é `RedisQueue`, que não é `AcknowledgesJobs` |
+| `['visibility_timeout' => 0]` ou `'abc'` | o construtor lança `InvalidArgumentException` (`visibility_timeout deve ser um inteiro maior que zero.`) |
 
 Sem factory registrada antes, `get(RedisConnectionFactory::class)` depois do `extend()` é um
 `Elavora\Api\Extension\Redis\RedisConnectionManager`. Pedir `get(Queue::class)` nesse caso abre
