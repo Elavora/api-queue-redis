@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Elavora\Api\Extension\QueueRedis\RedisQueue;
 use Elavora\Api\Extension\QueueRedis\RedisQueueExtension;
+use Elavora\Api\Extension\QueueRedis\ReliableRedisQueue;
+use Elavora\Api\Framework\Contracts\AcknowledgesJobs;
 use Elavora\Api\Extension\Redis\Contracts\RedisConnectionFactory;
 use Elavora\Api\Extension\Redis\RedisConnectionManager;
 use Elavora\Api\Framework\Application;
@@ -182,5 +184,83 @@ final class RedisQueueExtensionTest extends TestCase
             RedisConnectionManager::class,
             $application->container()->get(RedisConnectionFactory::class),
         );
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function bootWithListClient(array $config): Queue
+    {
+        $client = new InMemoryListRedisClient();
+        $application = Application::create();
+        $application->container()->instance(RedisConnectionFactory::class, new CountingConnectionFactory($client));
+        $application->extend(new RedisQueueExtension($config));
+
+        return $application->container()->get(Queue::class);
+    }
+
+    public function testBindsReliableQueueWhenClientSupportsListOperations(): void
+    {
+        $queue = $this->bootWithListClient(['prefix' => 'q:']);
+
+        self::assertInstanceOf(ReliableRedisQueue::class, $queue);
+        self::assertInstanceOf(AcknowledgesJobs::class, $queue);
+    }
+
+    public function testBindsPlainQueueWhenClientOnlySupportsRedisClient(): void
+    {
+        [$application] = $this->boot(['prefix' => 'q:']);
+        $queue = $application->container()->get(Queue::class);
+
+        self::assertInstanceOf(RedisQueue::class, $queue);
+        self::assertNotInstanceOf(AcknowledgesJobs::class, $queue);
+    }
+
+    public function testVisibilityTimeoutDefaultsTo300(): void
+    {
+        $queue = $this->bootWithListClient([]);
+        self::assertInstanceOf(ReliableRedisQueue::class, $queue);
+        $queue->push('jobs', ['a' => 1]);
+        $queue->reserve(['jobs']);
+
+        $client = (new ReflectionProperty($queue, 'redis'))->getValue($queue);
+        self::assertInstanceOf(InMemoryListRedisClient::class, $client);
+        self::assertSame(300, array_values($client->ttls)[0]);
+    }
+
+    public function testVisibilityTimeoutAcceptsIntAndNumericString(): void
+    {
+        foreach ([600, '600'] as $value) {
+            $queue = $this->bootWithListClient(['visibility_timeout' => $value]);
+            self::assertInstanceOf(ReliableRedisQueue::class, $queue);
+            $queue->push('jobs', ['a' => 1]);
+            $queue->reserve(['jobs']);
+
+            $client = (new ReflectionProperty($queue, 'redis'))->getValue($queue);
+            self::assertInstanceOf(InMemoryListRedisClient::class, $client);
+            self::assertSame(600, array_values($client->ttls)[0]);
+        }
+    }
+
+    public function testNullVisibilityTimeoutUsesDefault(): void
+    {
+        self::assertInstanceOf(ReliableRedisQueue::class, $this->bootWithListClient(['visibility_timeout' => null]));
+    }
+
+    /**
+     * @return array<string, array{mixed}>
+     */
+    public static function invalidVisibilityTimeouts(): array
+    {
+        return ['zero' => [0], 'negativo' => [-1], 'texto' => ['abc'], 'zero em texto' => ['0'], 'decimal' => ['1.5']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidVisibilityTimeouts')]
+    public function testInvalidVisibilityTimeoutThrowsInConstructor(mixed $value): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('visibility_timeout deve ser um inteiro maior que zero.');
+
+        new RedisQueueExtension(['visibility_timeout' => $value]);
     }
 }

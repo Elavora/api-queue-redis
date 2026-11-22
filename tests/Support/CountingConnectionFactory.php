@@ -15,11 +15,11 @@ final class CountingConnectionFactory implements RedisConnectionFactory
 
     public ?RedisConfig $lastConfig = null;
 
-    public InMemoryRedisClient $client;
+    public RedisClient $client;
 
-    public function __construct()
+    public function __construct(?RedisClient $client = null)
     {
-        $this->client = new InMemoryRedisClient();
+        $this->client = $client ?? new InMemoryRedisClient();
     }
 
     public function connect(RedisConfig $config): RedisClient

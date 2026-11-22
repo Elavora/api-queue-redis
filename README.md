@@ -23,14 +23,23 @@ Requisitos: PHP `>=8.4`, `ext-redis`, `elavora/api-framework` `^4.1 || ^5.0 || ^
 ## Uso
 
 Com o pacote instalado, o framework 2 registra a fila sozinho a partir das variáveis
-`REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DATABASE` e `QUEUE_PREFIX`.
+`REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DATABASE`, `QUEUE_PREFIX` e `QUEUE_VISIBILITY_TIMEOUT`.
 
 Para registrar à mão, use `RedisQueueExtension` com as opções `host`, `port`, `timeout`,
-`password`, `database` e `prefix`.
+`password`, `database`, `prefix` e `visibility_timeout`.
 
 Este pacote usa `elavora/api-redis` para abrir e reutilizar conexões Redis. Se
 outra extensão registrar uma implementação própria de `RedisConnectionFactory`,
 a fila passa a usar essa factory automaticamente.
+
+### Confirmação (ack) e prazo de visibilidade
+
+Com `elavora/api-framework` `^6.4` e `elavora/api-redis` `^3.1`, a fila registrada é a `ReliableRedisQueue`, que
+além de `push()` e `pop()` implementa `AcknowledgesJobs`: `reserve()` move o job para uma lista "em processamento",
+`acknowledge()` o descarta, e o job sem `ack` dentro de `QUEUE_VISIBILITY_TIMEOUT` segundos (padrão `300`) volta à
+fila. `extend()` renova o prazo de jobs longos e `reserve()` aceita várias filas em ordem de prioridade. `push()` e
+`pop()` não mudam, então a atualização é compatível. Sem essas versões, continua valendo o `RedisQueue` de antes.
+Detalhes e limites em [docs/USO.md](docs/USO.md#reliableredisqueue-classe-final-implementa-queue-e-elavoraapiframeworkcontractsacknowledgesjobs).
 
 A especificação completa está em [docs/USO.md](docs/USO.md).
 
